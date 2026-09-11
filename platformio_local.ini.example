@@ -1,0 +1,10 @@
+; ============================================================
+;  VORLAGE fuer lokale Overrides.
+;  1. Nach  platformio_local.ini  kopieren
+;  2. OTA-Passwort eintragen (muss zu OTA_PASSWORD_STR in secrets.h passen)
+;  platformio_local.ini ist per .gitignore ausgeschlossen.
+; ============================================================
+
+[env:ota]
+upload_flags =
+    --auth=DEIN_OTA_PASSWORT

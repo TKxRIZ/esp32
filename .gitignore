@@ -1,0 +1,16 @@
+# PlatformIO Build-Ordner
+.pio/
+
+# Persoenliche Zugangsdaten / lokale Overrides (Vorlagen: *.example)
+src/secrets.h
+platformio_local.ini
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# Claude Code lokale Einstellungen
+.claude/settings.local.json
+
+# macOS
+.DS_Store
