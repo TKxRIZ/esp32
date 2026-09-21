@@ -1,15 +1,12 @@
 {
   "name": "ESP32 OLED Firmware",
-  "version": "build-20260921-4435074",
+  "version": "release",
   "new_install_prompt_erase": true,
   "builds": [
     {
       "chipFamily": "ESP32",
       "parts": [
-        {
-          "path": "firmware.bin",
-          "offset": 0
-        }
+        { "path": "firmware-merged.bin", "offset": 0 }
       ]
     }
   ]

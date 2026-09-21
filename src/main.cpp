@@ -20,7 +20,9 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
+#include <HTTPUpdate.h>
 #include <WebServer.h>
 #include <DNSServer.h>
 #include <ESPmDNS.h>
@@ -49,6 +51,14 @@
 // OTA-Passwort fuer PlatformIO/ArduinoOTA-Uploads (in platformio.ini als --auth).
 static const char *OTA_PASSWORD = OTA_PASSWORD_STR;
 
+// ---- Firmware-Version & Update-Quelle (GitHub Releases) ----
+// FIRMWARE_VERSION wird beim Release-Build per Build-Flag gesetzt (Git-Tag).
+// Ohne Flag (lokale Entwicklung) ist es "dev" -> kein Auto-Update.
+#ifndef FIRMWARE_VERSION
+  #define FIRMWARE_VERSION "dev"
+#endif
+static const char *GH_REPO = "TKxRIZ/esp32";   // <owner>/<repo> fuer Releases
+
 // ---- OLED ----
 U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);
 static const int I2C_SDA = 21;
@@ -70,6 +80,7 @@ struct Config {
   int      startScr  = 1;       // 0..3
   int      pubIntMin = 15;      // 0 = nur manuell
   String   portalPw;            // leer = kein Schutz
+  bool     autoUpdate = true;   // automatische Firmware-Updates von GitHub
 } cfg;
 
 void loadConfig() {
@@ -82,6 +93,7 @@ void loadConfig() {
   cfg.startScr  = prefs.getInt("startscr", 1);
   cfg.pubIntMin = prefs.getInt("pubint", 15);
   cfg.portalPw  = prefs.getString("portalpw", "");
+  cfg.autoUpdate = prefs.getBool("autoupd", true);
   prefs.end();
 }
 void saveConfig() {
@@ -92,6 +104,7 @@ void saveConfig() {
   prefs.putInt("startscr", cfg.startScr);
   prefs.putInt("pubint", cfg.pubIntMin);
   prefs.putString("portalpw", cfg.portalPw);
+  prefs.putBool("autoupd", cfg.autoUpdate);
   prefs.end();
 }
 void factoryReset() {
@@ -112,6 +125,12 @@ int screen = SCR_LOCAL_IP;
 
 String        publicIP = "";
 unsigned long lastPublicFetch = 0;
+
+// ---- Firmware-Update-Status ----
+String        latestVersion = "";      // zuletzt ermittelte Release-Version
+String        updateStatus  = "";      // letzte Meldung (fuer Portal)
+unsigned long lastUpdateCheck = 0;
+const uint32_t UPDATE_CHECK_INTERVAL = 24UL * 3600UL * 1000UL;  // 24 h
 
 // ============================================================
 //  OLED-Helfer
@@ -141,6 +160,94 @@ void fetchPublicIP() {
   http.end();
   lastPublicFetch = millis();
   Serial.printf("Oeffentliche IPv4: %s\n", publicIP.c_str());
+}
+
+// ============================================================
+//  Firmware-Update von GitHub Releases
+// ============================================================
+
+// Neueste Release-Version (Tag) via GitHub-API ermitteln. "" bei Fehler.
+String fetchLatestVersion() {
+  if (WiFi.status() != WL_CONNECTED) return "";
+  WiFiClientSecure client;
+  client.setInsecure();                 // ohne CA-Pinning (Hobby-Setup)
+  HTTPClient http;
+  http.setConnectTimeout(6000);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  String url = "https://api.github.com/repos/" + String(GH_REPO) + "/releases/latest";
+  if (!http.begin(client, url)) return "";
+  http.addHeader("User-Agent", "esp32-oled-updater");   // von GitHub verlangt
+  int code = http.GET();
+  String tag = "";
+  if (code == 200) {
+    String body = http.getString();
+    int i = body.indexOf("\"tag_name\"");
+    if (i >= 0) {
+      int q1 = body.indexOf('"', body.indexOf(':', i) + 1);
+      int q2 = body.indexOf('"', q1 + 1);
+      if (q1 >= 0 && q2 > q1) tag = body.substring(q1 + 1, q2);
+    }
+  } else {
+    Serial.printf("Update-Check HTTP %d\n", code);
+  }
+  http.end();
+  return tag;
+}
+
+// Firmware vom neuesten Release ziehen und flashen (rebootet bei Erfolg).
+void performUpdate() {
+  updateStatus = "Update laeuft...";
+  oledMsg("Firmware-Update", "laedt...", latestVersion.c_str());
+  Serial.println("Starte Firmware-Update von GitHub ...");
+
+  WiFiClientSecure client;
+  client.setInsecure();
+
+  httpUpdate.rebootOnUpdate(true);
+  httpUpdate.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
+  httpUpdate.onProgress([](int cur, int total) {
+    int pct = total ? (int)((int64_t)cur * 100 / total) : 0;
+    char b[16]; snprintf(b, sizeof(b), "%d %%", pct);
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_6x12_tr); u8g2.drawStr(0, 12, "Firmware-Update");
+    u8g2.setFont(u8g2_font_9x15B_tr); u8g2.drawStr(0, 34, b);
+    u8g2.drawFrame(0, 48, 128, 10);
+    u8g2.drawBox(0, 48, pct * 128 / 100, 10);
+    u8g2.sendBuffer();
+  });
+
+  String url = "https://github.com/" + String(GH_REPO) +
+               "/releases/latest/download/firmware.bin";
+  t_httpUpdate_return ret = httpUpdate.update(client, url);
+  // Nur erreichbar, wenn KEIN Reboot erfolgte (also bei Fehler / no update):
+  if (ret == HTTP_UPDATE_FAILED) {
+    updateStatus = "Fehler: " + httpUpdate.getLastErrorString();
+    Serial.printf("Update fehlgeschlagen: %s\n", httpUpdate.getLastErrorString().c_str());
+    oledMsg("Update-Fehler", "", "");
+  } else if (ret == HTTP_UPDATE_NO_UPDATES) {
+    updateStatus = "Keine Aktualisierung noetig.";
+  }
+}
+
+// Prueft auf neue Version; flasht bei Bedarf (auto) bzw. immer bei manual.
+void checkForUpdate(bool manual) {
+  lastUpdateCheck = millis();
+  latestVersion = fetchLatestVersion();
+  if (latestVersion == "") {
+    updateStatus = "Update-Pruefung fehlgeschlagen.";
+    Serial.println(updateStatus);
+    return;
+  }
+  bool newer = latestVersion != String(FIRMWARE_VERSION);
+  Serial.printf("Aktuell: %s | Neueste: %s | %s\n",
+                FIRMWARE_VERSION, latestVersion.c_str(),
+                newer ? "Update verfuegbar" : "aktuell");
+  if (newer) {
+    updateStatus = "Update " + latestVersion + " verfuegbar.";
+    performUpdate();               // laedt & flasht (rebootet bei Erfolg)
+  } else {
+    updateStatus = "Firmware ist aktuell (" + String(FIRMWARE_VERSION) + ").";
+  }
 }
 
 bool connectSTA(uint32_t timeoutMs) {
@@ -244,10 +351,21 @@ String buildPage(const String &notice = "") {
   h += "<label><input type='checkbox' name='clearpw' value='1' style='width:auto'> Passwortschutz entfernen</label>";
   h += "<div class='muted'>Benutzername ist immer <b>admin</b>.</div></div>";
 
+  h += "<div class='card'><h2>Updates</h2>";
+  h += "<label><input type='checkbox' name='autoupd' value='1' style='width:auto'";
+  if (cfg.autoUpdate) h += " checked";
+  h += "> Automatische Firmware-Updates (taeglich pruefen)</label></div>";
+
   h += "<button type='submit'>Speichern &amp; neu starten</button></form>";
 
   h += "<div class='card'><h2>Firmware</h2>";
-  h += "<a href='/update' style='color:#8fd'>&#128260; OTA-Update (Firmware .bin hochladen)</a></div>";
+  h += "<span class='muted'>Installiert:</span> " + String(FIRMWARE_VERSION) + "<br>";
+  h += "<span class='muted'>Neueste (GitHub):</span> " +
+       (latestVersion == "" ? String("noch nicht geprueft") : htmlEscape(latestVersion)) + "<br>";
+  if (updateStatus != "") h += "<span class='muted'>Status:</span> " + htmlEscape(updateStatus) + "<br>";
+  h += "<form method='POST' action='/checkupdate' style='margin-top:.6rem'>";
+  h += "<button type='submit'>&#128259; Jetzt auf Updates pruefen &amp; installieren</button></form>";
+  h += "<a href='/update' style='color:#8fd;display:inline-block;margin-top:.8rem'>&#128260; Alternativ: .bin manuell hochladen</a></div>";
 
   // WLAN-Scan per JS nachladen (fuellt die Netz-Liste)
   h += "<script>fetch('/scan').then(r=>r.json()).then(a=>{"
@@ -302,6 +420,7 @@ void handleSave() {
     cfg.portalPw = "";
   else if (server.hasArg("portalpw") && server.arg("portalpw").length() > 0)
     cfg.portalPw = server.arg("portalpw");
+  cfg.autoUpdate = server.hasArg("autoupd");   // Checkbox: nur gesetzt wenn aktiv
 
   saveConfig();
 
@@ -423,12 +542,27 @@ void setupArduinoOTA() {
   ArduinoOTA.begin();   // startet auch mDNS mit dem Hostnamen
 }
 
+void handleCheckUpdate() {
+  if (!authOK()) return;
+  String page = "<!DOCTYPE html><meta charset='utf-8'>"
+                "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+                "<meta http-equiv='refresh' content='60;url=/'>"
+                "<body style='font-family:system-ui;background:#111;color:#eee;text-align:center;padding:40px'>"
+                "<h2>&#128259; Suche nach Updates &hellip;</h2>"
+                "<p>Falls ein Update vorliegt, laedt das Geraet die neue Firmware "
+                "und startet neu (~1 Min). Diese Seite aktualisiert sich automatisch.</p></body>";
+  server.send(200, "text/html; charset=utf-8", page);
+  delay(200);
+  checkForUpdate(true);   // rebootet bei erfolgreichem Update
+}
+
 void startPortal() {
   server.on("/", handleRoot);
   server.on("/save", HTTP_POST, handleSave);
   server.on("/scan", handleScan);
   server.on("/update", HTTP_GET, handleUpdatePage);
   server.on("/update", HTTP_POST, handleUpdateDone, handleUpdateUpload);
+  server.on("/checkupdate", HTTP_POST, handleCheckUpdate);
   server.onNotFound(handleNotFound);
   server.begin();
 }
@@ -647,6 +781,13 @@ void loop() {
   if (cfg.pubIntMin > 0 &&
       millis() - lastPublicFetch > (uint32_t)cfg.pubIntMin * 60000UL) {
     fetchPublicIP();
+  }
+
+  // Automatische Firmware-Updates: beim Start (lastUpdateCheck==0) + taeglich.
+  // Dev-Builds (FIRMWARE_VERSION=="dev") aktualisieren sich nie automatisch.
+  if (cfg.autoUpdate && String(FIRMWARE_VERSION) != "dev" &&
+      (lastUpdateCheck == 0 || millis() - lastUpdateCheck > UPDATE_CHECK_INTERVAL)) {
+    checkForUpdate(false);   // rebootet bei erfolgreichem Update
   }
 
   renderScreen();

@@ -1,6 +1,10 @@
 # PlatformIO Build-Ordner
 .pio/
 
+# Firmware-Images: werden bei Bedarf gebaut / vom Release-Workflow erzeugt,
+# nicht ins Git (Distribution laeuft ueber GitHub Releases + Pages).
+docs/firmware*.bin
+
 # Persoenliche Zugangsdaten / lokale Overrides (Vorlagen: *.example)
 src/secrets.h
 platformio_local.ini

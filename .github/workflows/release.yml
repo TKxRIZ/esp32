@@ -1,0 +1,107 @@
+name: Release Firmware
+
+# Laeuft, wenn ein GitHub-Release veroeffentlicht wird (Tag z. B. v1.2.0).
+# - baut die neutrale Firmware mit eingebetteter Versionsnummer (= Tag)
+# - haengt firmware.bin (OTA) und firmware-merged.bin (USB/Browser) an den Release
+# - deployt die Install-Seite (docs/ + merged bin) nach GitHub Pages
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # Release-Assets hochladen
+  pages: write      # GitHub Pages deployen
+  id-token: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Python einrichten
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: PlatformIO + esptool installieren
+        run: pip install --upgrade platformio esptool
+
+      - name: Version bestimmen
+        id: ver
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          [ -z "$TAG" ] && TAG="dev-${GITHUB_SHA::7}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Version: $TAG"
+
+      - name: Firmware bauen (versioniert, neutral)
+        env:
+          PLATFORMIO_BUILD_FLAGS: -DFIRMWARE_VERSION='"${{ steps.ver.outputs.tag }}"'
+        run: pio run -e installer
+
+      - name: Images vorbereiten (App + Merged)
+        run: |
+          B=.pio/build/installer
+          BOOT_APP0=$(find "$HOME/.platformio" -name boot_app0.bin | head -1)
+          mkdir -p out
+          # App-Image fuer OTA-Selbstupdate
+          cp "$B/firmware.bin" out/firmware.bin
+          # Merged-Image fuer USB/Browser-Installation
+          python -m esptool --chip esp32 merge-bin -o out/firmware-merged.bin \
+            --flash-mode dio --flash-freq 40m --flash-size 4MB \
+            0x1000  "$B/bootloader.bin" \
+            0x8000  "$B/partitions.bin" \
+            0xe000  "$BOOT_APP0" \
+            0x10000 "$B/firmware.bin"
+          ls -lh out
+
+      - name: Release-Assets anhaengen
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          files: |
+            out/firmware.bin
+            out/firmware-merged.bin
+
+      - name: Pages-Inhalt zusammenstellen
+        run: |
+          mkdir -p site
+          cp docs/index.html site/
+          cp out/firmware-merged.bin site/
+          # Manifest mit aktueller Version schreiben
+          python - "${{ steps.ver.outputs.tag }}" <<'PY'
+          import json, sys
+          m = {
+            "name": "ESP32 OLED Firmware",
+            "version": sys.argv[1],
+            "new_install_prompt_erase": True,
+            "builds": [{"chipFamily": "ESP32",
+                        "parts": [{"path": "firmware-merged.bin", "offset": 0}]}],
+          }
+          with open("site/manifest.json", "w") as f:
+              json.dump(m, f, indent=2); f.write("\n")
+          PY
+
+      - name: Pages-Artefakt hochladen
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Auf GitHub Pages deployen
+        id: deployment
+        uses: actions/deploy-pages@v4

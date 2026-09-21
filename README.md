@@ -16,9 +16,11 @@ Toolchain, kein Terminal:
 3. Nach dem Flashen mit dem WLAN **`ESP32-Setup`** verbinden und im Portal
    (`http://192.168.4.1`) das eigene WLAN eintragen. Fertig.
 
-> Die Seite wird von GitHub Pages aus dem Ordner `docs/` bereitgestellt; die
-> Firmware baut die GitHub Action automatisch (siehe unten). Web Serial
-> funktioniert nur über **HTTPS oder `localhost`**.
+Danach hält sich das Gerät per **Auto-Update** von selbst aktuell (siehe unten).
+
+> Die Install-Seite wird bei jedem Release automatisch über GitHub Pages
+> bereitgestellt und flasht die jeweils neueste Release-Firmware. Web Serial
+> funktioniert nur in Chrome/Edge (Desktop) über **HTTPS oder `localhost`**.
 
 ## Features
 
@@ -33,8 +35,11 @@ Toolchain, kein Terminal:
   - Einstellungen dauerhaft im Flash (NVS/Preferences)
 - **AP-Fallback**: Bei nicht erreichbarem WLAN öffnet das Gerät ein eigenes Netz
   `ESP32-Setup` mit Captive Portal (`http://192.168.4.1`)
+- **Automatische Updates**: holt neue Firmware selbstständig von GitHub Releases
+  (beim Start + täglich), plus manueller Update-Button im Portal
 - **OTA-Updates**: drahtlos aus PlatformIO (ArduinoOTA) oder per `.bin`-Upload
   im Browser (`/update`)
+- **Dreh-Encoder**: Screens durchdrehen, Tastendruck aktualisiert die öff. IP
 - **Werksreset**: BOOT beim Einschalten ~2 s gedrückt halten
 
 ## Hardware
@@ -166,37 +171,61 @@ Speichern → das Gerät startet neu und übernimmt die Werte.
 - **OTA schlägt fehl:** Prüfen, ob `--auth` in `platformio_local.ini` zu
   `OTA_PASSWORD_STR` in `secrets.h` passt. Im Zweifel per USB flashen.
 
-## Web-Installer & GitHub Pages (für Maintainer)
+## Firmware-Updates (OTA von GitHub Releases)
 
-Die öffentliche Install-Seite liegt im Ordner `docs/`:
+Die Firmware kann sich selbst über **GitHub Releases** aktualisieren:
 
-| Datei                | Zweck                                             |
-|----------------------|---------------------------------------------------|
-| `docs/index.html`    | Install-Seite mit ESP-Web-Tools-Button            |
-| `docs/manifest.json` | Beschreibt das Flash-Image für ESP Web Tools      |
-| `docs/firmware.bin`  | Fertiges Flash-Image (wird von der CI gebaut)     |
+- **Automatisch:** Ist im Portal „Automatische Firmware-Updates" aktiv (Standard),
+  prüft das Gerät beim Start und danach täglich, ob ein neueres Release vorliegt,
+  lädt es und flasht sich selbst (Fortschritt auf dem Display), dann Neustart.
+- **Manuell:** Im Portal → Abschnitt **Firmware** → „Jetzt auf Updates prüfen &
+  installieren". Alternativ weiterhin `.bin` per Browser hochladen (`/update`).
 
-**Automatischer Build:** Die GitHub Action
-`.github/workflows/build-installer.yml` baut bei jedem Push auf `main`
-(Änderungen in `src/` oder `platformio.ini`) die **neutrale** Firmware
-(`pio run -e installer`, ohne persönliche Zugangsdaten → Gerät startet im
-Setup-AP), führt sie zu `docs/firmware.bin` zusammen und committet das Ergebnis.
+Das Gerät kennt seine eigene Version (`FIRMWARE_VERSION`, beim Release-Build aus
+dem Git-Tag gesetzt), fragt `…/releases/latest` ab und lädt bei einer neueren
+Version `…/releases/latest/download/firmware.bin`. **Dev-Builds** (Version
+`dev`) aktualisieren sich nie automatisch.
 
-**Lokal bauen/testen:**
+> Voraussetzung: **öffentliches Repo** – Release-Assets privater Repos sind nicht
+> ohne Token herunterladbar.
+
+## Release veröffentlichen (für Maintainer)
+
+Updates werden ausschließlich über Releases verteilt. Ein neues Release
+veröffentlichen:
 
 ```bash
-pio run -e installer         # neutrale Firmware (SKIP_SECRETS)
-# zu einem Flash-Image mergen -> docs/firmware.bin (siehe Workflow-Schritt)
-cd docs && python3 -m http.server 8123   # dann http://localhost:8123 in Chrome
+# Version taggen und Release anlegen (Beispiel v1.1.0)
+gh release create v1.1.0 --title "v1.1.0" --notes "Was ist neu ..."
 ```
 
-Web Serial erlaubt `localhost`, damit lässt sich die Seite auch **vor** dem
-Veröffentlichen testen.
+Das löst `.github/workflows/release.yml` aus. Der Workflow:
 
-**Wenn das Repo öffentlich wird – GitHub Pages aktivieren:**
+1. baut die **neutrale** Firmware mit `FIRMWARE_VERSION = <Tag>`
+   (`pio run -e installer`, ohne persönliche Zugangsdaten),
+2. hängt zwei Assets an den Release:
+   - `firmware.bin` – App-Image für **OTA-Selbstupdate**
+   - `firmware-merged.bin` – vollständiges Image für **USB/Browser-Installation**
+3. deployt die **Install-Seite** (`docs/index.html` + `firmware-merged.bin`)
+   nach GitHub Pages.
+
+Danach ziehen Install-Seite **und** OTA automatisch das neueste Release.
+
+### GitHub Pages aktivieren (einmalig, sobald das Repo öffentlich ist)
 
 1. Repo → **Settings** → **Pages**
-2. **Source:** „Deploy from a branch"
-3. **Branch:** `main`, **Ordner:** `/docs` → **Save**
-4. Nach ein paar Minuten ist die Seite unter
-   `https://<github-name>.github.io/esp32/` erreichbar.
+2. **Source:** „**GitHub Actions**" auswählen
+3. Ein Release veröffentlichen (oder den Workflow manuell via „Run workflow"
+   starten) → Seite erscheint unter `https://<github-name>.github.io/esp32/`.
+
+### Lokal testen (vor der Veröffentlichung)
+
+```bash
+pio run -e installer                     # neutrale Firmware (SKIP_SECRETS)
+# App- und Merged-Image nach docs/ bauen (siehe Merge-Schritt in release.yml),
+# firmware-merged.bin nach docs/ kopieren, dann:
+cd docs && python3 -m http.server 8123   # http://localhost:8123 in Chrome
+```
+
+Web Serial erlaubt `localhost`, damit lässt sich die Install-Seite auch **vor**
+dem Veröffentlichen testen.
