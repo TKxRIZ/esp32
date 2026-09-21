@@ -41,6 +41,12 @@ static const int I2C_SDA = 21;
 static const int I2C_SCL = 22;
 static const int BTN     = 0;   // BOOT-Button, active-low
 
+// ---- Dreh-Encoder (EC11) ----
+static const int ENC_CLK = 18;  // CLK -> D18
+static const int ENC_DT  = 19;  // DT  -> D19
+static const int ENC_SW  = 5;   // SW  -> D5  (Achtung: GPIO5 ist Strapping-Pin,
+                                //             beim Booten nicht gedrueckt halten)
+
 // ---- Persistente Konfiguration ----
 Preferences prefs;
 struct Config {
@@ -517,11 +523,64 @@ void handleButton() {
   }
 }
 
+// ---- Dreh-Encoder: interrupt-basierter Gray-Code-Decoder ----
+volatile int32_t encDelta = 0;
+volatile uint8_t encPrevAB = 0;
+// Zustandstabelle (im DRAM, damit der Zugriff aus dem ISR sicher ist)
+DRAM_ATTR static const int8_t ENC_TABLE[16] =
+    {0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0};
+
+void IRAM_ATTR encoderISR() {
+  uint8_t ab = (digitalRead(ENC_CLK) << 1) | digitalRead(ENC_DT);
+  encDelta += ENC_TABLE[(encPrevAB << 2) | ab];
+  encPrevAB = ab;
+}
+
+void handleEncoder() {
+  // Drehung auswerten: 4 Schritte (= eine Rastung) -> ein Screen weiter/zurueck
+  static int32_t acc = 0;
+  noInterrupts();
+  acc += encDelta; encDelta = 0;
+  interrupts();
+  while (acc >= 4) {
+    acc -= 4;
+    screen = (screen + 1) % SCR_COUNT;
+    if (screen == SCR_PUBLIC_IP && publicIP == "") fetchPublicIP();
+  }
+  while (acc <= -4) {
+    acc += 4;
+    screen = (screen - 1 + SCR_COUNT) % SCR_COUNT;
+    if (screen == SCR_PUBLIC_IP && publicIP == "") fetchPublicIP();
+  }
+
+  // Taster (SW): entprellt -> oeffentliche IP aktualisieren + hinspringen
+  static bool stable = HIGH, lastRead = HIGH;
+  static unsigned long tChange = 0;
+  bool r = digitalRead(ENC_SW);
+  if (r != lastRead) { tChange = millis(); lastRead = r; }
+  if (millis() - tChange > 30 && r != stable) {
+    stable = r;
+    if (stable == LOW) {                     // gedrueckt
+      oledMsg("Aktualisiere", "oeff. IP...", "");
+      fetchPublicIP();
+      screen = SCR_PUBLIC_IP;
+    }
+  }
+}
+
 // ============================================================
 void setup() {
   Serial.begin(115200);
   delay(200);
   pinMode(BTN, INPUT_PULLUP);
+
+  // Dreh-Encoder
+  pinMode(ENC_CLK, INPUT_PULLUP);
+  pinMode(ENC_DT, INPUT_PULLUP);
+  pinMode(ENC_SW, INPUT_PULLUP);
+  encPrevAB = (digitalRead(ENC_CLK) << 1) | digitalRead(ENC_DT);
+  attachInterrupt(digitalPinToInterrupt(ENC_CLK), encoderISR, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENC_DT), encoderISR, CHANGE);
 
   Wire.begin(I2C_SDA, I2C_SCL);
   u8g2.setI2CAddress(0x3C * 2);
@@ -562,6 +621,7 @@ void loop() {
 
   ArduinoOTA.handle();
   handleButton();
+  handleEncoder();
 
   // WLAN verloren? -> reconnecten, sonst AP-Setup
   if (WiFi.status() != WL_CONNECTED) {
