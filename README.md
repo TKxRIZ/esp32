@@ -5,6 +5,21 @@ dem WLAN und zeigt Netzwerk-Infos auf dem Display an. Konfiguriert wird alles
 bequem über ein Web-Portal, und neue Firmware lässt sich drahtlos (OTA)
 aufspielen – ohne USB-Kabel.
 
+## Installation per Browser (für Endnutzer)
+
+Am einfachsten geht's über die **Web-Install-Seite** – kein PlatformIO, keine
+Toolchain, kein Terminal:
+
+1. Die Seite in **Chrome** oder **Edge** (Desktop) öffnen:
+   `https://<dein-github-name>.github.io/esp32/`
+2. ESP32 per USB anschließen, **„Firmware installieren"** klicken, Port wählen.
+3. Nach dem Flashen mit dem WLAN **`ESP32-Setup`** verbinden und im Portal
+   (`http://192.168.4.1`) das eigene WLAN eintragen. Fertig.
+
+> Die Seite wird von GitHub Pages aus dem Ordner `docs/` bereitgestellt; die
+> Firmware baut die GitHub Action automatisch (siehe unten). Web Serial
+> funktioniert nur über **HTTPS oder `localhost`**.
+
 ## Features
 
 - **4 Anzeige-Screens**, umschaltbar per BOOT-Button:
@@ -150,3 +165,38 @@ Speichern → das Gerät startet neu und übernimmt die Werte.
   auf 1,8 V stellen → Boot-Loop).
 - **OTA schlägt fehl:** Prüfen, ob `--auth` in `platformio_local.ini` zu
   `OTA_PASSWORD_STR` in `secrets.h` passt. Im Zweifel per USB flashen.
+
+## Web-Installer & GitHub Pages (für Maintainer)
+
+Die öffentliche Install-Seite liegt im Ordner `docs/`:
+
+| Datei                | Zweck                                             |
+|----------------------|---------------------------------------------------|
+| `docs/index.html`    | Install-Seite mit ESP-Web-Tools-Button            |
+| `docs/manifest.json` | Beschreibt das Flash-Image für ESP Web Tools      |
+| `docs/firmware.bin`  | Fertiges Flash-Image (wird von der CI gebaut)     |
+
+**Automatischer Build:** Die GitHub Action
+`.github/workflows/build-installer.yml` baut bei jedem Push auf `main`
+(Änderungen in `src/` oder `platformio.ini`) die **neutrale** Firmware
+(`pio run -e installer`, ohne persönliche Zugangsdaten → Gerät startet im
+Setup-AP), führt sie zu `docs/firmware.bin` zusammen und committet das Ergebnis.
+
+**Lokal bauen/testen:**
+
+```bash
+pio run -e installer         # neutrale Firmware (SKIP_SECRETS)
+# zu einem Flash-Image mergen -> docs/firmware.bin (siehe Workflow-Schritt)
+cd docs && python3 -m http.server 8123   # dann http://localhost:8123 in Chrome
+```
+
+Web Serial erlaubt `localhost`, damit lässt sich die Seite auch **vor** dem
+Veröffentlichen testen.
+
+**Wenn das Repo öffentlich wird – GitHub Pages aktivieren:**
+
+1. Repo → **Settings** → **Pages**
+2. **Source:** „Deploy from a branch"
+3. **Branch:** `main`, **Ordner:** `/docs` → **Save**
+4. Nach ein paar Minuten ist die Seite unter
+   `https://<github-name>.github.io/esp32/` erreichbar.

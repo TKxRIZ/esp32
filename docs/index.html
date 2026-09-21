@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ESP32 OLED Firmware – Installer</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 680px; margin: 0 auto; padding: 24px 16px 60px;
+      background: #0f1115; color: #e8e8ea; line-height: 1.55;
+    }
+    h1 { font-size: 1.8rem; margin-bottom: .2rem; }
+    h2 { font-size: 1.15rem; margin-top: 2rem; color: #7fe3c0; }
+    p.lead { color: #aab; font-size: 1.05rem; }
+    .card {
+      background: #171a21; border: 1px solid #262b36; border-radius: 14px;
+      padding: 20px; margin: 18px 0;
+    }
+    .install { text-align: center; }
+    esp-web-install-button { --esp-tools-button-color: #012; }
+    .btn {
+      display: inline-block; background: #2bbd8a; color: #012;
+      font-weight: 700; font-size: 1.1rem; border: 0; border-radius: 10px;
+      padding: .8rem 1.6rem; cursor: pointer;
+    }
+    .btn:hover { background: #38d69c; }
+    ol { padding-left: 1.2rem; } li { margin: .4rem 0; }
+    code { background: #22252e; padding: .1rem .4rem; border-radius: 5px; font-size: .9em; }
+    .muted { color: #8891a0; font-size: .9rem; }
+    .warn { background: #2a2410; border-color: #4a4020; color: #e8d9a0; }
+    table { width: 100%; border-collapse: collapse; margin-top: .5rem; }
+    td { padding: .35rem .5rem; border-bottom: 1px solid #262b36; }
+    td:first-child { color: #8891a0; width: 40%; }
+    a { color: #7fe3c0; }
+  </style>
+</head>
+<body>
+  <h1>📟 ESP32 OLED Firmware</h1>
+  <p class="lead">
+    Netzwerk-Infodisplay mit Web-Konfigurationsportal, Dreh-Encoder und
+    drahtlosen Updates. In einer Minute installiert – direkt aus dem Browser,
+    ganz ohne Programmierkenntnisse.
+  </p>
+
+  <div class="card install">
+    <esp-web-install-button manifest="./manifest.json">
+      <button class="btn" slot="activate">🔌 Firmware installieren</button>
+      <span slot="unsupported">
+        ⚠️ Dein Browser unterstützt kein Web Serial. Bitte <b>Chrome</b> oder
+        <b>Edge</b> am Desktop verwenden (nicht Safari/Firefox, nicht am Handy).
+      </span>
+      <span slot="not-allowed">
+        ⚠️ Installation nur über HTTPS oder <code>localhost</code> möglich.
+      </span>
+    </esp-web-install-button>
+    <p class="muted">Funktioniert in Chrome &amp; Edge (Desktop). ESP32 per USB-Kabel anschließen.</p>
+  </div>
+
+  <h2>So geht's</h2>
+  <div class="card">
+    <ol>
+      <li>ESP32 mit einem <b>USB-Datenkabel</b> an den Computer anschließen.</li>
+      <li>Oben auf <b>„Firmware installieren"</b> klicken.</li>
+      <li>Im Auswahlfenster den seriellen Port des ESP32 wählen
+        (heißt z. B. <code>CP2102</code> oder <code>USB Serial</code>) und bestätigen.</li>
+      <li>Installation abwarten – der ESP startet danach automatisch neu.</li>
+    </ol>
+  </div>
+
+  <h2>Einrichten (nach der Installation)</h2>
+  <div class="card">
+    <p>Die Firmware bringt ein eigenes Einrichtungs-WLAN mit – <b>keine Code-Änderung nötig</b>:</p>
+    <ol>
+      <li>Mit dem WLAN <b><code>ESP32-Setup</code></b> verbinden (Handy oder Laptop).</li>
+      <li>Es öffnet sich automatisch ein Konfigurations-Portal
+        (falls nicht: <code>http://192.168.4.1</code> aufrufen).</li>
+      <li>Dein <b>WLAN</b>, den <b>Gerätenamen</b> und weitere Optionen eintragen und speichern.</li>
+      <li>Fertig – der ESP verbindet sich und zeigt seine IP-Adresse auf dem Display.
+        Das Portal ist danach unter dieser IP bzw. <code>http://&lt;name&gt;.local</code> erreichbar.</li>
+    </ol>
+    <p class="muted">Spätere Updates kannst du drahtlos über das Portal (Menüpunkt „OTA-Update") einspielen.</p>
+  </div>
+
+  <h2>Passende Hardware</h2>
+  <div class="card">
+    <table>
+      <tr><td>Board</td><td>ESP32 DevKit v1 (ESP32-WROOM-32)</td></tr>
+      <tr><td>Display</td><td>OLED 128×64, Controller SH1106, I²C</td></tr>
+      <tr><td>OLED-Anschluss</td><td>SDA→GPIO21, SCL→GPIO22, VCC→3V3, GND→GND</td></tr>
+      <tr><td>Dreh-Encoder</td><td>CLK→GPIO18, DT→GPIO19, SW→GPIO5 (optional)</td></tr>
+    </table>
+    <p class="muted" style="margin-top:.8rem">
+      Hinweis: Diese Firmware ist auf ein <b>SH1106</b>-Display abgestimmt.
+      Bei einem echten SSD1306 kann die Anzeige verschoben sein.
+    </p>
+  </div>
+
+  <p class="muted" style="text-align:center; margin-top:2rem">
+    Open-Source-Firmware · Installation läuft komplett lokal in deinem Browser,
+    es werden keine Daten übertragen.
+  </p>
+
+  <script type="module"
+    src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js"></script>
+</body>
+</html>

@@ -30,7 +30,21 @@
 #include <U8g2lib.h>
 #include <Wire.h>
 #include <math.h>
-#include "secrets.h"   // WIFI_SSID_DEFAULT, WIFI_PASS_DEFAULT, OTA_PASSWORD_STR (nicht im Git)
+// secrets.h ist optional: Wenn vorhanden (lokale Entwicklung), liefert es die
+// Standard-Zugangsdaten. Fehlt es (CI-/Installer-Build) oder ist SKIP_SECRETS
+// gesetzt, bleiben die Defaults leer -> das Geraet startet im Setup-AP-Modus.
+#if __has_include("secrets.h") && !defined(SKIP_SECRETS)
+  #include "secrets.h"
+#endif
+#ifndef WIFI_SSID_DEFAULT
+  #define WIFI_SSID_DEFAULT ""
+#endif
+#ifndef WIFI_PASS_DEFAULT
+  #define WIFI_PASS_DEFAULT ""
+#endif
+#ifndef OTA_PASSWORD_STR
+  #define OTA_PASSWORD_STR "esp32-ota"
+#endif
 
 // OTA-Passwort fuer PlatformIO/ArduinoOTA-Uploads (in platformio.ini als --auth).
 static const char *OTA_PASSWORD = OTA_PASSWORD_STR;
