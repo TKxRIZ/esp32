@@ -131,8 +131,10 @@ pio run -e ota -t upload
 Ziel ist `esp32-oled.local` (in `platformio.ini` als `upload_port`). Bei
 mDNS-Problemen dort stattdessen die feste IP eintragen.
 
-> ⚠️ **`pio run -t upload` ohne `-e`** baut/flasht **beide** Environments
-> nacheinander (erst USB, dann OTA). Für gezieltes Flashen immer `-e` angeben.
+> `pio run` / `pio run -t upload` **ohne `-e`** verwenden nur das Standard-Env
+> `esp32doit-devkit-v1` (USB, Dev-Build). Die Envs `ota` und `installer` müssen
+> explizit mit `-e` gewählt werden – so kann die neutrale Installer-Firmware nie
+> versehentlich über den eigenen Dev-Stand geflasht werden.
 
 ### Drahtlos über den Browser (Web-Upload)
 
@@ -246,10 +248,23 @@ Danach ziehen Install-Seite **und** OTA automatisch das neueste Release.
 
 ### GitHub Pages aktivieren (einmalig, sobald das Repo öffentlich ist)
 
-1. Repo → **Settings** → **Pages**
-2. **Source:** „**GitHub Actions**" auswählen
-3. Ein Release veröffentlichen (oder den Workflow manuell via „Run workflow"
-   starten) → Seite erscheint unter `https://tkxriz.github.io/esp32/`.
+1. Repo → **Settings** → **Pages** → **Source:** „**GitHub Actions**"
+2. **Tag-Deploys erlauben.** Der Release-Workflow läuft vom *Tag* (z. B.
+   `v1.0.0`), das automatisch angelegte `github-pages`-Environment lässt aber
+   standardmäßig nur den `main`-Branch deployen – der Deploy-Job scheitert
+   sonst sofort. Settings → **Environments** → `github-pages` →
+   *Deployment branches and tags* → Regel für **Tag** `v*` hinzufügen.
+   Oder per CLI:
+   ```bash
+   gh api -X PUT  repos/<user>/esp32/environments/github-pages \
+     --input - <<< '{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}'
+   gh api -X POST repos/<user>/esp32/environments/github-pages/deployment-branch-policies \
+     -f name='v*' -f type=tag
+   ```
+3. Ein Release veröffentlichen → Seite erscheint unter
+   `https://tkxriz.github.io/esp32/`. Ein manueller „Run workflow" baut nur zum
+   Test und deployt **nicht** (bewusstes Gate gegen versehentliche Dev-Builds
+   auf der öffentlichen Seite).
 
 ### Lokal testen (vor der Veröffentlichung)
 
