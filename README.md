@@ -262,3 +262,8 @@ cd docs && python3 -m http.server 8123   # http://localhost:8123 in Chrome
 
 Web Serial erlaubt `localhost`, damit lässt sich die Install-Seite auch **vor**
 dem Veröffentlichen testen.
+
+## Lizenz
+
+[MIT](LICENSE) – frei nutzbar, veränderbar und weitergebbar; der
+Copyright-Hinweis muss erhalten bleiben. Keine Gewährleistung.
