@@ -64,6 +64,7 @@ jobs:
           ls -lh out
 
       - name: Release-Assets anhaengen
+        if: github.event_name == 'release'   # bei manuellem Lauf nur Build-Test
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.release.tag_name }}
@@ -97,6 +98,9 @@ jobs:
 
   deploy:
     needs: build
+    # Nur echte Releases landen auf der oeffentlichen Install-Seite;
+    # ein manueller "Run workflow" dient nur als Build-Test.
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

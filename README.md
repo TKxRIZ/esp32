@@ -11,7 +11,7 @@ Am einfachsten geht's über die **Web-Install-Seite** – kein PlatformIO, keine
 Toolchain, kein Terminal:
 
 1. Die Seite in **Chrome** oder **Edge** (Desktop) öffnen:
-   `https://<dein-github-name>.github.io/esp32/`
+   `https://tkxriz.github.io/esp32/`
 2. ESP32 per USB anschließen, **„Firmware installieren"** klicken, Port wählen.
 3. Nach dem Flashen mit dem WLAN **`ESP32-Setup`** verbinden und im Portal
    (`http://192.168.4.1`) das eigene WLAN eintragen. Fertig.
@@ -28,7 +28,7 @@ Danach hält sich das Gerät per **Auto-Update** von selbst aktuell (siehe unten
   1. Öffentliche IPv4 (via `api.ipify.org`)
   2. Lokale IPv4
   3. WLAN-Signalstärke (dBm + Balken)
-  4. Animation (Sinuswelle mit Ball)
+  4. Uhr (Datum + Uhrzeit per NTP, Zeitzone wählbar)
 - **Web-Konfigurationsportal** unter der lokalen IP bzw. `http://<hostname>.local`
   - WLAN-SSID/-Passwort (mit Netz-Scan), Gerätename, Start-Screen,
     Öffentliche-IP-Intervall, Portal-Passwort (Basic-Auth)
@@ -59,6 +59,19 @@ Danach hält sich das Gerät per **Auto-Update** von selbst aktuell (siehe unten
 | GND  | GND            |
 | SDA  | GPIO **21**    |
 | SCL  | GPIO **22**    |
+
+### Verkabelung (Dreh-Encoder ↔ ESP32, optional)
+
+| Encoder | ESP32       |
+|---------|-------------|
+| +       | 3V3         |
+| GND     | GND         |
+| CLK     | GPIO **18** |
+| DT      | GPIO **19** |
+| SW      | GPIO **5**  |
+
+> GPIO 5 ist ein Strapping-Pin: den Encoder-Taster **nicht beim Einschalten
+> gedrückt halten**.
 
 > **Wichtig:** Das Display ist ein **SH1106** (nicht SSD1306). Mit dem falschen
 > Treiber gibt es Rauschen/Streifen. Der Code nutzt daher die U8g2-Library mit
@@ -156,6 +169,26 @@ Speichern → das Gerät startet neu und übernimmt die Werte.
 - **Werksreset:** BOOT beim Einschalten ~2 s halten → alle Einstellungen gelöscht,
   danach AP-Setupmodus
 
+## Sicherheitshinweise & bekannte Einschränkungen
+
+Dies ist ein Hobby-Projekt für das eigene Heimnetz. Bewusst einfach gehalten:
+
+- **TLS ohne Zertifikatsprüfung:** Update-Check und -Download laufen zwar über
+  HTTPS, aber ohne CA-Pinning (`setInsecure()`). Firmware wird **nicht
+  signiert**. Wer den Netzwerkpfad kontrolliert, könnte theoretisch eine fremde
+  Firmware unterschieben. Für den Betrieb im eigenen WLAN vertretbar, nicht für
+  unsichere Netze.
+- **Setup-WLAN ist offen:** `ESP32-Setup` hat kein Passwort. Während der
+  Einrichtung kann jeder in Reichweite das Portal aufrufen. Danach wird das
+  Setup-Netz nicht mehr geöffnet (außer bei WLAN-Verlust).
+- **Portal-Passwort ist optional** und schützt per HTTP-Basic-Auth (unverschlüsselt
+  im LAN). Im AP-Modus ist das Portal bewusst ungeschützt (Recovery).
+- **Versionsvergleich ist „ungleich = Update":** Das Gerät installiert immer das
+  *neueste* Release, auch wenn es formal älter wäre. Keine Downgrades veröffentlichen.
+- **Flash-Reserve:** Die App-Partition (1,31 MB) ist zu ~82 % belegt. Wächst die
+  Firmware darüber hinaus, schlägt OTA fehl – dann wäre ein neues
+  Partitionsschema + Neu-Flash per USB nötig.
+
 ## Troubleshooting
 
 - **Display zeigt Rauschen/Streifen:** falscher Controller. Dieser Code nutzt
@@ -216,7 +249,7 @@ Danach ziehen Install-Seite **und** OTA automatisch das neueste Release.
 1. Repo → **Settings** → **Pages**
 2. **Source:** „**GitHub Actions**" auswählen
 3. Ein Release veröffentlichen (oder den Workflow manuell via „Run workflow"
-   starten) → Seite erscheint unter `https://<github-name>.github.io/esp32/`.
+   starten) → Seite erscheint unter `https://tkxriz.github.io/esp32/`.
 
 ### Lokal testen (vor der Veröffentlichung)
 

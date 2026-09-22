@@ -1,21 +1,28 @@
 /*
- * ESP32 + SH1106 OLED: 4 Screens + Web-Konfigurationsportal.
+ * ESP32 + SH1106 OLED: Netzwerk-Infodisplay mit Web-Konfigurationsportal,
+ * Dreh-Encoder und automatischen Firmware-Updates von GitHub Releases.
  *
- *  Screens (BOOT-Button GPIO0 schaltet weiter):
- *    1) Oeffentliche IPv4   2) Lokale IPv4   3) WLAN-Signal   4) Animation
+ *  Screens (Dreh-Encoder oder BOOT-Button GPIO0 schalten weiter):
+ *    1) Oeffentliche IPv4   2) Lokale IPv4   3) WLAN-Signal   4) Uhr (NTP)
+ *    Encoder-Taster: oeffentliche IP neu holen und anzeigen.
  *
  *  Konfigurationsportal:
  *    - STA-Modus (WLAN verbunden): Webserver unter der lokalen IP,
  *      zusaetzlich per mDNS erreichbar (http://<hostname>.local).
  *    - AP-Fallback (kein/falsches WLAN): eigenes Netz "ESP32-Setup",
  *      Captive Portal unter http://192.168.4.1
- *    - Einstellungen: SSID, Passwort, Hostname, Start-Screen,
- *      Oeff.-IP-Intervall, Portal-Passwort (Basic-Auth in STA).
+ *    - Einstellungen: SSID, Passwort, Hostname, Start-Screen, Zeitzone,
+ *      Oeff.-IP-Intervall, Portal-Passwort (Basic-Auth in STA), Auto-Update.
  *    - Alle Einstellungen dauerhaft im Flash (Preferences/NVS).
+ *
+ *  Updates:
+ *    - Auto-Update von GitHub Releases (Start + taeglich), manueller Button
+ *    - ArduinoOTA (PlatformIO ueber WLAN) und .bin-Upload im Browser (/update)
  *
  *  Werksreset: BOOT beim Einschalten gedrueckt halten (~2 s).
  *
- *  OLED: SH1106 128x64, I2C 0x3C, SDA=21, SCL=22.
+ *  Hardware: OLED SH1106 128x64, I2C 0x3C, SDA=21, SCL=22.
+ *            Encoder CLK=18, DT=19, SW=5.
  */
 
 #include <Arduino.h>
@@ -31,7 +38,6 @@
 #include <Update.h>
 #include <U8g2lib.h>
 #include <Wire.h>
-#include <math.h>
 // secrets.h ist optional: Wenn vorhanden (lokale Entwicklung), liefert es die
 // Standard-Zugangsdaten. Fehlt es (CI-/Installer-Build) oder ist SKIP_SECRETS
 // gesetzt, bleiben die Defaults leer -> das Geraet startet im Setup-AP-Modus.
@@ -134,6 +140,8 @@ String        latestVersion = "";      // zuletzt ermittelte Release-Version
 String        updateStatus  = "";      // letzte Meldung (fuer Portal)
 unsigned long lastUpdateCheck = 0;
 const uint32_t UPDATE_CHECK_INTERVAL = 24UL * 3600UL * 1000UL;  // 24 h
+const uint32_t UPDATE_RETRY_INTERVAL = 3600UL * 1000UL;          // 1 h nach Fehler
+uint32_t       updateCheckDelay = UPDATE_CHECK_INTERVAL;
 
 // ============================================================
 //  OLED-Helfer
@@ -238,9 +246,11 @@ void checkForUpdate(bool manual) {
   latestVersion = fetchLatestVersion();
   if (latestVersion == "") {
     updateStatus = "Update-Pruefung fehlgeschlagen.";
+    updateCheckDelay = UPDATE_RETRY_INTERVAL;   // bald erneut versuchen
     Serial.println(updateStatus);
     return;
   }
+  updateCheckDelay = UPDATE_CHECK_INTERVAL;
   bool newer = latestVersion != String(FIRMWARE_VERSION);
   Serial.printf("Aktuell: %s | Neueste: %s | %s\n",
                 FIRMWARE_VERSION, latestVersion.c_str(),
@@ -425,8 +435,19 @@ void handleSave() {
   if (server.hasArg("pass") && server.arg("pass").length() > 0) {
     cfg.pass = server.arg("pass"); wifiChanged = true;
   }
-  if (server.hasArg("host") && server.arg("host").length() > 0)
-    cfg.host = server.arg("host");
+  if (server.hasArg("host") && server.arg("host").length() > 0) {
+    // Hostname fuer mDNS/DHCP bereinigen: nur a-z, 0-9, '-'; max. 32 Zeichen
+    String hn = server.arg("host"); hn.toLowerCase(); hn.trim();
+    String clean;
+    for (char c : hn) {
+      if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') clean += c;
+      else if (c == ' ' || c == '_' || c == '.') clean += '-';
+    }
+    while (clean.startsWith("-")) clean.remove(0, 1);
+    while (clean.endsWith("-"))   clean.remove(clean.length() - 1);
+    if (clean.length() > 32) clean = clean.substring(0, 32);
+    if (clean.length() > 0) cfg.host = clean;
+  }
   if (server.hasArg("startscr"))
     cfg.startScr = constrain(server.arg("startscr").toInt(), 0, 3);
   if (server.hasArg("pubint"))
@@ -820,10 +841,13 @@ void loop() {
     fetchPublicIP();
   }
 
-  // Automatische Firmware-Updates: beim Start (lastUpdateCheck==0) + taeglich.
-  // Dev-Builds (FIRMWARE_VERSION=="dev") aktualisieren sich nie automatisch.
-  if (cfg.autoUpdate && String(FIRMWARE_VERSION) != "dev" &&
-      (lastUpdateCheck == 0 || millis() - lastUpdateCheck > UPDATE_CHECK_INTERVAL)) {
+  // Automatische Firmware-Updates: ~10 s nach dem Start (Display darf erst
+  // einmal zeichnen), danach taeglich; nach fehlgeschlagener Pruefung
+  // bereits nach 1 h erneut. Dev-Builds (Version beginnt mit "dev")
+  // aktualisieren sich nie automatisch.
+  if (cfg.autoUpdate && !String(FIRMWARE_VERSION).startsWith("dev") &&
+      ((lastUpdateCheck == 0 && millis() > 10000UL) ||
+       (lastUpdateCheck != 0 && millis() - lastUpdateCheck > updateCheckDelay))) {
     checkForUpdate(false);   // rebootet bei erfolgreichem Update
   }
 
