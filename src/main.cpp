@@ -81,6 +81,7 @@ struct Config {
   int      pubIntMin = 15;      // 0 = nur manuell
   String   portalPw;            // leer = kein Schutz
   bool     autoUpdate = true;   // automatische Firmware-Updates von GitHub
+  String   tz = "CET-1CEST,M3.5.0,M10.5.0/3";  // POSIX-Zeitzone (Europe/Berlin)
 } cfg;
 
 void loadConfig() {
@@ -94,6 +95,7 @@ void loadConfig() {
   cfg.pubIntMin = prefs.getInt("pubint", 15);
   cfg.portalPw  = prefs.getString("portalpw", "");
   cfg.autoUpdate = prefs.getBool("autoupd", true);
+  cfg.tz         = prefs.getString("tz", "CET-1CEST,M3.5.0,M10.5.0/3");
   prefs.end();
 }
 void saveConfig() {
@@ -105,6 +107,7 @@ void saveConfig() {
   prefs.putInt("pubint", cfg.pubIntMin);
   prefs.putString("portalpw", cfg.portalPw);
   prefs.putBool("autoupd", cfg.autoUpdate);
+  prefs.putString("tz", cfg.tz);
   prefs.end();
 }
 void factoryReset() {
@@ -120,7 +123,7 @@ Mode mode = MODE_STA;
 WebServer server(80);
 DNSServer dns;
 
-enum Screen { SCR_PUBLIC_IP, SCR_LOCAL_IP, SCR_RSSI, SCR_ANIM, SCR_COUNT };
+enum Screen { SCR_PUBLIC_IP, SCR_LOCAL_IP, SCR_RSSI, SCR_CLOCK, SCR_COUNT };
 int screen = SCR_LOCAL_IP;
 
 String        publicIP = "";
@@ -295,6 +298,11 @@ String optionRow(int val, int cur, const char *label) {
          (val == cur ? " selected" : "") + ">" + label + "</option>";
 }
 
+String tzOption(const char *val, const String &cur, const char *label) {
+  return "<option value='" + String(val) + "'" +
+         (cur == val ? " selected" : "") + ">" + label + "</option>";
+}
+
 String buildPage(const String &notice = "") {
   String ip   = (mode == MODE_STA) ? WiFi.localIP().toString() : "192.168.4.1";
   String rssi = (mode == MODE_STA) ? String(WiFi.RSSI()) + " dBm" : "-";
@@ -336,13 +344,20 @@ String buildPage(const String &notice = "") {
   h += optionRow(0, cfg.startScr, "Oeffentliche IP");
   h += optionRow(1, cfg.startScr, "Lokale IP");
   h += optionRow(2, cfg.startScr, "WLAN-Signal");
-  h += optionRow(3, cfg.startScr, "Animation");
+  h += optionRow(3, cfg.startScr, "Uhr");
   h += "</select>";
   h += "<label>Oeffentliche IP aktualisieren</label><select name='pubint'>";
   h += optionRow(0,  cfg.pubIntMin, "nur manuell");
   h += optionRow(5,  cfg.pubIntMin, "alle 5 min");
   h += optionRow(15, cfg.pubIntMin, "alle 15 min");
   h += optionRow(60, cfg.pubIntMin, "alle 60 min");
+  h += "</select>";
+  h += "<label>Zeitzone (Uhr-Screen)</label><select name='tz'>";
+  h += tzOption("CET-1CEST,M3.5.0,M10.5.0/3", cfg.tz, "Europa/Berlin (MEZ/MESZ)");
+  h += tzOption("GMT0BST,M3.5.0/1,M10.5.0",   cfg.tz, "Europa/London");
+  h += tzOption("UTC0",                        cfg.tz, "UTC");
+  h += tzOption("EST5EDT,M3.2.0,M11.1.0",      cfg.tz, "USA Ost (New York)");
+  h += tzOption("PST8PDT,M3.2.0,M11.1.0",      cfg.tz, "USA West (Los Angeles)");
   h += "</select></div>";
 
   h += "<div class='card'><h2>Sicherheit</h2>";
@@ -416,6 +431,8 @@ void handleSave() {
     cfg.startScr = constrain(server.arg("startscr").toInt(), 0, 3);
   if (server.hasArg("pubint"))
     cfg.pubIntMin = server.arg("pubint").toInt();
+  if (server.hasArg("tz") && server.arg("tz").length() > 0)
+    cfg.tz = server.arg("tz");
   if (server.hasArg("clearpw"))
     cfg.portalPw = "";
   else if (server.hasArg("portalpw") && server.arg("portalpw").length() > 0)
@@ -584,6 +601,8 @@ void startSTAServices() {
   setupArduinoOTA();                       // startet mDNS mit dem Hostnamen
   MDNS.addService("http", "tcp", 80);      // Portal per <host>.local erreichbar
   Serial.printf("mDNS: http://%s.local/\n", cfg.host.c_str());
+  // NTP-Zeit synchronisieren (Zeitzone aus der Konfiguration)
+  configTzTime(cfg.tz.c_str(), "pool.ntp.org", "time.nist.gov", "time.google.com");
   startPortal();
   fetchPublicIP();
   Serial.printf("Portal: http://%s/   OTA: aktiv\n", WiFi.localIP().toString().c_str());
@@ -628,20 +647,38 @@ void renderRSSI() {
   drawPageDots(screen);
   u8g2.sendBuffer();
 }
-void renderAnim() {
-  static float phase = 0; static int bx = 0;
+void renderClock() {
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_6x12_tr);
-  u8g2.drawStr(0, 12, "ESP32 :)");
-  const float k = 0.16f;
-  for (int x = 0; x < 128; x++) {
-    int y = 36 + (int)(16.0f * sinf(x * k + phase));
-    u8g2.drawPixel(x, y); u8g2.drawPixel(x, y + 1);
+  u8g2.drawStr(0, 12, "Uhrzeit");
+
+  struct tm t;
+  if (!getLocalTime(&t, 100) || t.tm_year < (2020 - 1900)) {
+    // Zeit noch nicht synchronisiert
+    u8g2.setFont(u8g2_font_7x14B_tr);
+    u8g2.drawStr(0, 38, "synchron.");
+    u8g2.setFont(u8g2_font_6x12_tr);
+    u8g2.drawStr(0, 54, "warte auf NTP...");
+    drawPageDots(screen);
+    u8g2.sendBuffer();
+    return;
   }
-  bx = (bx + 3) % 128;
-  int by = 36 + (int)(16.0f * sinf(bx * k + phase));
-  u8g2.drawDisc(bx, by, 3);
-  phase += 0.30f;
+
+  static const char *wd[] = {"So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"};
+  char datebuf[24], timebuf[12];
+  snprintf(datebuf, sizeof(datebuf), "%s, %02d.%02d.%04d",
+           wd[t.tm_wday % 7], t.tm_mday, t.tm_mon + 1, t.tm_year + 1900);
+  snprintf(timebuf, sizeof(timebuf), "%02d:%02d:%02d",
+           t.tm_hour, t.tm_min, t.tm_sec);
+
+  // Datum klein oben
+  u8g2.setFont(u8g2_font_6x12_tr);
+  u8g2.drawStr(0, 26, datebuf);
+  // Uhrzeit gross, zentriert
+  u8g2.setFont(u8g2_font_logisoso20_tn);
+  int w = u8g2.getStrWidth(timebuf);
+  u8g2.drawStr((128 - w) / 2, 52, timebuf);
+
   drawPageDots(screen);
   u8g2.sendBuffer();
 }
@@ -650,7 +687,7 @@ void renderScreen() {
     case SCR_PUBLIC_IP: drawIPScreen("Oeffentliche IPv4:", publicIP == "" ? String("---") : publicIP); break;
     case SCR_LOCAL_IP:  drawIPScreen("Lokale IPv4:", WiFi.localIP().toString()); break;
     case SCR_RSSI:      renderRSSI(); break;
-    case SCR_ANIM:      renderAnim(); break;
+    case SCR_CLOCK:     renderClock(); break;
   }
 }
 
